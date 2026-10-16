@@ -1,0 +1,128 @@
+<!doctype html>
+eita<html lang="pt-BR">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>EITA! — Multiplayer</title>
+<style>
+:root{--ink:#27213a;--muted:#746d83;--coral:#ff6b61;--yellow:#ffd166;--teal:#39c6b4;--purple:#8567ed;--paper:#fffdf8;--line:#eee8f4}
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:radial-gradient(circle at 10% 5%,#ffe4dc 0,transparent 30%),radial-gradient(circle at 90% 15%,#e3dcff 0,transparent 28%),#fffaf2;color:var(--ink);font-family:ui-rounded,"Trebuchet MS",system-ui,sans-serif}
+main{max-width:760px;margin:auto;padding:22px 16px 48px}.top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:18px}.logo{font-weight:1000;font-size:clamp(2rem,7vw,3.2rem);letter-spacing:-.07em;color:var(--coral);text-shadow:3px 3px 0 var(--yellow)}.pill{border:1px solid #e8deef;border-radius:999px;padding:8px 12px;background:#fff;font-size:.8rem;font-weight:800;color:var(--muted)}
+.card{background:rgba(255,255,255,.94);border:1px solid var(--line);border-radius:25px;padding:clamp(20px,5vw,34px);box-shadow:0 12px 35px #4c2c6910}.center{text-align:center}.eyebrow{text-transform:uppercase;font-size:.76rem;letter-spacing:.12em;font-weight:900;color:var(--purple)}h1{font-size:clamp(1.7rem,5vw,2.4rem);line-height:1.08;letter-spacing:-.04em;margin:8px 0 12px}.sub{color:var(--muted);line-height:1.55}.emoji{font-size:3rem;display:block;margin-bottom:10px}.btn{border:0;border-radius:15px;padding:14px 18px;font:inherit;font-weight:900;cursor:pointer;margin-top:10px}.btn:disabled{opacity:.45;cursor:not-allowed}.primary{background:var(--coral);color:white;box-shadow:0 5px 0 #df5149}.secondary{background:#f2edff;color:#5540a7}.full{width:100%}.input{width:100%;border:2px solid var(--line);border-radius:14px;padding:14px;font:inherit;outline:none;margin:8px 0}.input:focus{border-color:var(--purple)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}@media(max-width:520px){.grid{grid-template-columns:1fr}}.result{padding:14px;border-radius:16px;background:#f7f3ff;margin:10px 0;text-align:left}.notice{font-size:.86rem;color:var(--muted);margin-top:14px;line-height:1.5}.hidden{display:none!important}.status{font-weight:800}.players{padding-left:22px;line-height:1.8}.code{font-size:2rem;letter-spacing:.16em;font-weight:1000;color:var(--purple)}.footer{text-align:center;color:var(--muted);font-size:.78rem;margin:18px 0 0}a{color:#654cc7}
+</style>
+</head>
+<body><main>
+<header class="top"><div class="logo">EITA!</div><div class="pill">🌐 Multiplayer</div></header>
+
+<section id="setup" class="card center">
+<span class="emoji">🤪</span><div class="eyebrow">O caos agora é compartilhado</div>
+<h1>Jogue com seus amigos, cada um no seu celular.</h1>
+<p class="sub">Crie uma sala ou entre com um código. Esta versão conecta a sala e a lista de participantes ao Supabase. A votação e as seis rodadas serão integradas na próxima etapa.</p>
+<input id="nickname" class="input" maxlength="18" placeholder="Seu apelido" aria-label="Seu apelido">
+<div class="grid">
+<button id="create" class="btn primary">Criar sala</button>
+<div><input id="roomCodeInput" class="input" maxlength="6" placeholder="CÓDIGO" aria-label="Código da sala" style="text-transform:uppercase"><button id="join" class="btn secondary full">Entrar na sala</button></div>
+</div>
+<p id="setupStatus" class="notice" aria-live="polite">Configure a URL e a chave pública no arquivo config.js antes de usar.</p>
+</section>
+
+<section id="lobby" class="card hidden">
+<div class="eyebrow">SALA DO EITA!</div><h1 id="lobbyTitle">Sua sala</h1>
+<p class="sub">Compartilhe o código com os amigos. Eles podem entrar pelo link publicado e digitar esse código.</p>
+<div class="result center"><div>CODIGO DA SALA</div><div id="roomCode" class="code">------</div><button id="copyCode" class="btn secondary">Copiar código</button></div>
+<div class="grid">
+<div class="result"><strong>Participantes</strong><div id="playerCount" style="font-size:2rem;font-weight:1000">0</div></div>
+<div class="result"><strong>Conectados agora</strong><div id="onlineCount" style="font-size:2rem;font-weight:1000">0</div></div>
+</div>
+<div class="result"><strong>Quem está na sala</strong><ul id="playerList" class="players"><li>Aguardando participantes…</li></ul></div>
+<p id="roomStatus" class="status" aria-live="polite">Sala aberta</p>
+<button id="startRoom" class="btn primary full hidden">Iniciar partida</button>
+<button id="closeRoom" class="btn secondary full hidden">Encerrar sala</button>
+<p id="lobbyFeedback" class="notice"></p>
+</section>
+<p class="footer">EITA! • Protótipo multiplayer inicial</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./config.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let supabaseClient = null, roomCode = null, accessToken = null, isHost = false, pollTimer = null;
+let nickname = "";
+function saySetup(message){ $("setupStatus").textContent = message; }
+function showScreen(id){ $("setup").classList.toggle("hidden", id !== "setup"); $("lobby").classList.toggle("hidden", id !== "lobby"); }
+function makeClient(){
+  if (!window.EITA_CONFIG || !EITA_CONFIG.SUPABASE_URL || !EITA_CONFIG.SUPABASE_ANON_KEY ||
+      EITA_CONFIG.SUPABASE_URL.includes("COLE_") || EITA_CONFIG.SUPABASE_ANON_KEY.includes("COLE_")) {
+    throw new Error("Abra config.js e preencha a URL e a chave pública do Supabase.");
+  }
+  if (!window.supabase) throw new Error("Não foi possível carregar a biblioteca do Supabase. Verifique a conexão com a internet.");
+  if (!supabaseClient) supabaseClient = window.supabase.createClient(EITA_CONFIG.SUPABASE_URL, EITA_CONFIG.SUPABASE_ANON_KEY);
+  return supabaseClient;
+}
+async function rpc(name, args){
+ const {data,error} = await makeClient().rpc(name,args);
+ if(error) throw error;
+ return data;
+}
+function cleanCode(v){return (v||"").trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,6);}
+async function createRoom(){
+ nickname = $("nickname").value.trim() || "Organizador";
+ try {
+  saySetup("Criando sala…");
+  const data = await rpc("eita_create_room",{p_host_name:nickname});
+  roomCode=data.code;accessToken=data.host_token;isHost=true;
+  enterLobby();
+ } catch(e){saySetup("Não foi possível criar a sala: "+e.message);}
+}
+async function joinRoom(){
+ nickname = $("nickname").value.trim() || "Jogador";
+ const code=cleanCode($("roomCodeInput").value);
+ if(code.length!==6){saySetup("Digite o código de 6 caracteres da sala.");return;}
+ try{
+  saySetup("Entrando na sala…");
+  const data=await rpc("eita_join_room",{p_code:code,p_nickname:nickname});
+  roomCode=data.code;accessToken=data.player_token;isHost=false;
+  enterLobby();
+ }catch(e){saySetup("Não foi possível entrar: "+e.message);}
+}
+function enterLobby(){
+ $("roomCode").textContent=roomCode;
+ $("lobbyTitle").textContent=isHost?"Você criou uma sala!":"Você entrou na sala!";
+ $("startRoom").classList.toggle("hidden",!isHost);
+ $("closeRoom").classList.toggle("hidden",!isHost);
+ $("lobbyFeedback").textContent=isHost?"Compartilhe o código e inicie quando todos estiverem prontos.":"Você está na sala. Aguarde o organizador iniciar.";
+ showScreen("lobby"); refreshState();
+ if(pollTimer) clearInterval(pollTimer);
+ pollTimer=setInterval(refreshState,3000);
+}
+async function refreshState(){
+ if(!roomCode||!accessToken)return;
+ try{
+  if(!isHost) await rpc("eita_ping_player",{p_code:roomCode,p_player_token:accessToken});
+  const state=await rpc("eita_room_state",{p_code:roomCode,p_access_token:accessToken});
+  $("playerCount").textContent=state.players.length;
+  $("onlineCount").textContent=state.players.filter(p=>p.online).length;
+  $("playerList").innerHTML="";
+  state.players.forEach(p=>{const li=document.createElement("li");li.textContent=p.nickname+(p.online?" · online":" · ausente");$("playerList").append(li);});
+  $("roomStatus").textContent=state.status==="waiting"?"Sala aberta · aguardando início":state.status==="active"?"Partida iniciada · próxima etapa: rodadas e votação": "Sala encerrada";
+  $("startRoom").disabled=state.status!=="waiting" || state.players.length<1;
+  $("closeRoom").disabled=state.status==="closed";
+  if(state.status==="closed")$("lobbyFeedback").textContent="O organizador encerrou esta sala.";
+ }catch(e){$("lobbyFeedback").textContent="Conexão temporariamente indisponível: "+e.message;}
+}
+$("create").addEventListener("click",createRoom);
+$("join").addEventListener("click",joinRoom);
+$("startRoom").addEventListener("click",async()=>{
+ try{await rpc("eita_start_room",{p_code:roomCode,p_host_token:accessToken});await refreshState();}
+ catch(e){$("lobbyFeedback").textContent="Não foi possível iniciar: "+e.message;}
+});
+$("closeRoom").addEventListener("click",async()=>{
+ if(!confirm("Encerrar esta sala para todos?"))return;
+ try{await rpc("eita_close_room",{p_code:roomCode,p_host_token:accessToken});await refreshState();}
+ catch(e){$("lobbyFeedback").textContent="Não foi possível encerrar: "+e.message;}
+});
+$("copyCode").addEventListener("click",async()=>{
+ try{await navigator.clipboard.writeText(roomCode);$("lobbyFeedback").textContent="Código copiado! Envie aos participantes.";}
+ catch(e){$("lobbyFeedback").textContent="Código da sala: "+roomCode;}
+});
+$("roomCodeInput").addEventListener("input",e=>e.target.value=cleanCode(e.target.value));
+</script></body></html>
